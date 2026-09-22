@@ -1,0 +1,394 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+enum Role {
+  USER
+  DRIVER
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  DELETED
+}
+
+enum AuthProvider {
+  CREDENTIAL
+  GOOGLE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+
+enum DriverVerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DriverAvailability {
+  OFFLINE
+  AVAILABLE
+  ON_TRIP
+}
+
+enum AmbulanceType {
+  BASIC
+  ADVANCED_LIFE_SUPPORT
+  ICU
+  NEONATAL
+}
+
+enum AmbulanceStatus {
+  AVAILABLE
+  ON_TRIP
+  MAINTENANCE
+  OUT_OF_SERVICE
+}
+
+
+enum RequestPriority {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+
+enum RequestStatus {
+  REQUESTED
+  ASSIGNED
+  DRIVER_EN_ROUTE
+  ARRIVED_AT_PICKUP
+  PATIENT_ONBOARD
+  EN_ROUTE_TO_HOSPITAL
+  ARRIVED_AT_HOSPITAL
+  COMPLETED
+  CANCELLED
+}
+
+
+enum PaymentGateway {
+  BKASH
+  SSLCOMMERZ
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+
+enum NotificationType {
+  REQUEST_CREATED
+  REQUEST_ASSIGNED
+  REQUEST_STATUS_UPDATED
+  REQUEST_CANCELLED
+  PAYMENT_RECEIVED
+  DRIVER_VERIFICATION
+  GENERAL
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  STATUS_CHANGE
+  ASSIGN
+  LOGIN
+  PAYMENT
+}
+
+
+
+model User {
+  id                 String       @id @default(uuid())
+  name               String
+  email              String       @unique
+  phone              String?
+  password           String?
+  googleId           String?      @unique
+  authProvider       AuthProvider @default(CREDENTIAL)
+  emailVerified      Boolean      @default(false)
+  role               Role         @default(USER)
+  status             UserStatus   @default(ACTIVE)
+  needPasswordChange Boolean      @default(false)
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  driver               DriverProfile?
+  emergencyRequests    EmergencyRequest[]  @relation("CallerRequests")
+  assignedByAdmin      EmergencyRequest[]  @relation("AssignedByAdmin")
+  cancelledRequests    EmergencyRequest[]  @relation("CancelledByUser")
+  notifications        Notification[]
+  auditLogs            AuditLog[]
+
+  @@index([role])
+  @@index([email])
+  @@map("users")
+}
+
+
+model Notification {
+  id String @id @default(uuid())
+
+  type    NotificationType @default(GENERAL)
+  title   String
+  message String
+  isRead  Boolean          @default(false)
+  meta    Json?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id String @id @default(uuid())
+
+  action     AuditAction
+  entityType String
+  entityId   String?
+  message    String
+  meta       Json?
+
+  actorId String?
+  actor   User?   @relation(fields: [actorId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model DriverProfile {
+  id String @id @default(uuid())
+
+  licenseNumber String @unique
+  licensePhoto  String?
+  yearsOfExperience Int @default(0)
+
+  verificationStatus DriverVerificationStatus @default(PENDING)
+  rejectionReason    String?
+  reviewedById       String?
+  reviewedAt         DateTime?
+
+  availability DriverAvailability @default(OFFLINE)
+
+  currentLat Float?
+  currentLng Float?
+  locationUpdatedAt DateTime?
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  ambulance Ambulance?
+
+  emergencyRequests EmergencyRequest[] @relation("DriverRequests")
+
+  @@index([availability])
+  @@index([verificationStatus])
+  @@map("driver_profiles")
+}
+
+model Ambulance {
+  id String @id @default(uuid())
+
+  plateNumber String        @unique
+  type        AmbulanceType @default(BASIC)
+  status      AmbulanceStatus @default(AVAILABLE)
+
+  currentLat Float?
+  currentLng Float?
+  locationUpdatedAt DateTime?
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  driverId String?        @unique
+  driver   DriverProfile? @relation(fields: [driverId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  homeHospitalId String?
+  homeHospital   Hospital? @relation(fields: [homeHospitalId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  emergencyRequests EmergencyRequest[]
+
+  @@index([status])
+  @@index([type])
+  @@map("ambulances")
+}
+
+model Hospital {
+  id String @id @default(uuid())
+
+  name    String
+  address String
+  lat     Float
+  lng     Float
+  contactNumber String
+
+  hasEmergencyUnit Boolean @default(true)
+  bedCapacity      Int     @default(0)
+
+  isActive  Boolean   @default(true)
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ambulances        Ambulance[]
+  emergencyRequests EmergencyRequest[]
+
+  @@index([isActive])
+  @@map("hospitals")
+}
+
+
+model EmergencyRequest {
+  id String @id @default(uuid())
+
+  callerId String
+  caller   User   @relation("CallerRequests", fields: [callerId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  patientName  String
+  patientPhone String
+  patientAge   Int?
+  patientGender Gender?
+  notes        String?
+
+  pickupAddress String
+  pickupLat     Float
+  pickupLng     Float
+
+  priority RequestPriority @default(MEDIUM)
+  status   RequestStatus   @default(REQUESTED)
+
+  ambulanceId String?
+  ambulance   Ambulance? @relation(fields: [ambulanceId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  driverId String?
+  driver   DriverProfile? @relation("DriverRequests", fields: [driverId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  assignedById String?
+  assignedBy   User?   @relation("AssignedByAdmin", fields: [assignedById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  assignedAt   DateTime?
+
+  hospitalId String?
+  hospital   Hospital? @relation(fields: [hospitalId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  driverEnRouteAt      DateTime?
+  arrivedAtPickupAt    DateTime?
+  patientOnboardAt     DateTime?
+  enRouteToHospitalAt  DateTime?
+  arrivedAtHospitalAt  DateTime?
+  completedAt          DateTime?
+
+  cancelledById String?
+  cancelledBy   User?   @relation("CancelledByUser", fields: [cancelledById], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  cancelReason  String?
+  cancelledAt   DateTime?
+
+  distanceKm Decimal? @db.Decimal(10, 2)
+  fareAmount Decimal? @db.Decimal(10, 2)
+
+  isDeleted Boolean   @default(false)
+  deletedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payment Payment?
+
+  @@index([status])
+  @@index([priority])
+  @@index([callerId])
+  @@index([driverId])
+  @@index([ambulanceId])
+  @@index([createdAt])
+  @@map("emergency_requests")
+}
+
+model Payment {
+  id String @id @default(uuid())
+
+  gateway PaymentGateway
+  status  PaymentStatus  @default(PENDING)
+
+  amount   Decimal @db.Decimal(10, 2)
+  currency String  @default("BDT")
+
+  merchantInvoiceNumber String @unique
+
+  bkashPaymentId String? @unique
+  bkashTrxId     String?
+
+  sslTranId  String? @unique
+  sslValId   String?
+  sslCardType String?
+  sslBankTranId String?
+
+  payerName    String?
+  payerEmail   String?
+  payerPhone   String?
+
+  paidAt DateTime?
+
+  gatewayInitResponse   Json?
+  gatewayVerifyResponse Json?
+
+  failureReason String?
+
+  refundAmount Decimal?  @db.Decimal(10, 2)
+  refundReason String?
+  refundedAt   DateTime?
+
+  emergencyRequestId String            @unique
+  emergencyRequest   EmergencyRequest @relation(fields: [emergencyRequestId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([gateway])
+  @@map("payments")
+}
